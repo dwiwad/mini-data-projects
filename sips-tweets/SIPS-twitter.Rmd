@@ -1,0 +1,178 @@
+---
+title: "SIPS-twitter"
+author: "Dylan Wiwad"
+date: '2018-06-26'
+output: pdf_document
+---
+
+# Scraping tweets and doing basic frequencies
+
+I'm uploading this markdown doc, which will basically just be a bit more heavily annotated code, so people who are interested can see how simple it is to get data from Twitter!
+
+Obligatory set up chunk, just to get a bunch of packages.
+
+```{r setup, echo=TRUE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Packages
+library(formatR)
+library(ggplot2)
+library(stringr) # Cleaning the tweet text
+library(twitteR) # Scraping twitter
+library(ROAuth) # Need it to get authentication with twitter
+library(plyr)
+library(httr)
+library(tm)
+
+# defining a function to append to a list
+lappend <- function(lst, obj) {  
+  lst[[length(lst)+1]] <- obj
+  return(lst)
+}
+```
+
+```{r auth, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+# Set my API Keys
+api_key <- "3qaYk4H0XqeN6iLywwnYnTELW"
+api_secret <- "j1dLTyyhdNRPl8IwONWxLpqx1nGjjkcG9BmuITL5bAYulHmJbO"
+access_token <- "4510107553-pZ5bUomHhwvnPvGdSw8F7wUbx1sfFhHD1cyUuaC"
+access_token_secret <- "23rqoLtL68dTOV47ZHsFiKf3QrcBuh8RMJLvxYsNzku4D"
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+```
+
+The first thing I'm going to do is grab all of the tweets with the SIPS2018 hashtag, using the searchTwitter function from the TwitteR package. In order to do this I had to setup an account with Twitter to get an API key. You can do this on apps.twitter.com. Then I entered the keys up above, where you would enter your own to use the script.
+
+I have hidden the code that I used to set up my api key, because I can't share it as it is linked to my twitter account. However, here is the chunk I used:
+
+api_key <- ""  
+api_secret <- ""  
+access_token <- ""  
+access_token_secret <- ""  
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+
+If you want to use this code, or work with twitter, you need to make an account as described above, insert your keys in the quotation marks above and run the setup_twitter_oauth command.
+
+So with that in mind, let's call twitter and get the tweets.
+
+```{r grab tweets, echo=TRUE}
+# Get all the tweets
+tweets <- searchTwitter("#SIPS2018", n = 3000)
+# Turn the tweets into a DF
+df <- twListToDF(tweets)
+# Remove retweets
+og_tweets <- df[ which(df$isRetweet=='FALSE'),]
+
+# Print out the first bit of the twitter data so you can see what it looks like
+head(df)
+```
+
+Next is to just pull out the text variable - all I'm concerned with right now is counting words. So grabbing that column and cleaning it a bit. First I split each tweet on spaces so every word becomes it's own element, then append every word of every tweet to a new list called "together." I also print out the first few rows of the "text" column, so you can see what I'm working with.
+
+```{r text, echo=TRUE}
+content <- og_tweets$text
+head(content)
+
+# split the tweets
+tweets_split <- strsplit(content, " ")
+together <- c() # This makes our empty list we are going to append each word to
+
+# Append every word to our list using the lappend function from above
+for (row in tweets_split){
+  for (word in row){
+    together <- lappend(together, word)
+  }
+}
+
+```
+
+Now, this is what we end up with in our "together" list:
+
+```{r list, echo=TRUE}
+head(together, n=25)
+```
+
+Next is a bit more cleaning, but this time on just the individual words. I'm gonna remove emojis, make every word lower case, remove stopwords, remove punctuation (including hashtags), and then make it a dataframe.
+
+```{r}
+# Deletes all non-alpha-numeric characters
+together <- iconv(together, 'ASCII', 'UTF-8', sub='') 
+# Makes everything lower case
+together <- tolower(together)
+# Brings in our dictionary of stopwords from the TM package
+stopwords <- stopwords('en')
+# Removes any element from "stopwords" from our list
+together <- removeWords(together, stopwords)
+# Removes punctuation
+together <- removePunctuation(together)
+# Turns out newly cleaned list into a single column DF
+together <- as.data.frame(together)
+```
+
+# Visualizing the tweets
+## Most frequent words
+
+Now that we have a nice clean data set, I'll pull out the info that we want and visualize it! In the first line, I take our new dataframe of the words and then count each individual word.
+
+The next line orders the new dataframe in reverse, so the most frequently used words are right at the top. The next line, I delete the top two because the first is just nothing, and the second is #SIPS2018 - which is obviously present in every single tweet. So it's not all that informative.
+
+Then, I just trim the dataset so it's only the top 25 tweets.
+
+Then, I just make a plot using ggplot!
+
+```{r counts, echo=TRUE, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+counts <- count(together$together)
+counts <- counts[order(-counts$freq),]
+counts <- counts[-c(1, 2), ]
+counts <- head(counts, n=25)
+
+sips_words <- ggplot(counts, aes(x=reorder(x, freq), y=freq)) + geom_bar(stat='identity', fill='#232066') + coord_flip() + labs(x='Word', y='Frequency') + ggtitle("Most Frequently Used Words on Twitter; #SIPS2018") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(hjust = 0.5), plot.margin = unit(c(.5,.5,.5,.5), 'cm')) + scale_y_continuous(expand = c(0, 0), limits = c(0, 150))
+sips_words
+
+```
+
+## Most frequent tweeters
+
+In the next block I do all the same as above, but just with twitter handles!
+
+```{r handles, echo=TRUE, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+name_counts <- count(df$screenName)
+name_counts <- name_counts[order(-name_counts$freq),]
+name_counts <- head(name_counts, n=25)
+
+sips_names <- ggplot(name_counts, aes(x=reorder(x, freq), y=freq)) + geom_bar(stat='identity', fill='#CD6155') + coord_flip() + labs(x='Handle', y='Frequency') + ggtitle("Most Frequent handles; #SIPS2018") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), plot.title = element_text(hjust = 0.5), plot.margin = unit(c(.5,.5,.5,.5), 'cm')) + scale_y_continuous(expand = c(0, 0), limits = c(0, 150))
+sips_names
+```
+
+## The most 'impactful' tweets
+
+Looking at the most liked tweets, it does not make a ton of sense to visualize, as the content of the tweet is important. 
+
+So, in this small little block I just make a new little dataset ordered by most to least number of likes and then print the top 5!
+
+```{r likes, echo=TRUE}
+like_counts <- og_tweets[order(-og_tweets$favoriteCount),]
+head(like_counts$text, n=5)
+
+```
+
+And that's the basics of twitter scraping, with the SIPS2018 hashtag! 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
